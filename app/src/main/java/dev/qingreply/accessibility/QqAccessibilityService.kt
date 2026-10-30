@@ -54,14 +54,19 @@ class QqAccessibilityService : AccessibilityService() {
         override fun close() { entries.forEach { it.node.recycle() } }
     }
 
+    @Suppress("DEPRECATION")
     private fun readTree(): Tree? {
         val root = rootInActiveWindow ?: return null
+        if (root.packageName?.toString() != NotificationReader.QQ_PACKAGE) {
+            root.recycle()
+            return null
+        }
         val bounds = Rect().also(root::getBoundsInScreen)
         val entries = mutableListOf<Entry>()
         fun visit(node: AccessibilityNodeInfo, scrolling: Boolean, ancestorClick: AccessibilityNodeInfo?, clickDepth: Int, depth: Int) {
             val rect = Rect().also(node::getBoundsInScreen)
             val click = if (node.isClickable && node.isEnabled) node else if (clickDepth < 2) ancestorClick else null
-            val text = if (node.isEditable) node.text?.toString().orEmpty()
+            val text = if (node.isPassword) "" else if (node.isEditable) node.text?.toString().orEmpty()
                 else node.text?.toString()?.takeIf(String::isNotBlank) ?: node.contentDescription?.toString().orEmpty()
             entries += Entry(node, click, UiElement(text, node.className?.toString().orEmpty(), node.viewIdResourceName.orEmpty(),
                 rect.top, rect.bottom, rect.left, rect.right, node.isVisibleToUser, node.isEnabled, node.isEditable,
