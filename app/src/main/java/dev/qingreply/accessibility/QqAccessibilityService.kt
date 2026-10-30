@@ -95,6 +95,7 @@ class QqAccessibilityService : AccessibilityService() {
         var reason = "未打开原 QQ 会话，请检查小米后台弹出界面权限"
         suspend fun checkAllowed() {
             currentCoroutineContext().ensureActive()
+            if (instance !== this@QqAccessibilityService) throw CancellationException("Accessibility service disconnected")
             if (!allowed()) throw CancellationException("Automatic reply disabled or changed")
             if (locked()) throw UiReplyException("手机已锁屏：无障碍发送需要保持解锁，不会自动解锁手机")
         }

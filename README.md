@@ -117,7 +117,7 @@ API Key 用 Android Keystore 的 AES-GCM 加密保存在设备私有存储，禁
 ./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug
 ```
 
-APK：`app/build/outputs/apk/debug/app-debug.apk`，当前版本 1.3.1。GitHub Actions 执行构建、测试和 Lint，保存 APK 与报告。调试包用于验证，正式分发请设置自己的 release 签名；不同环境的调试签名可能不一致。
+APK：`app/build/outputs/apk/debug/app-debug.apk`，当前版本 1.3.2。GitHub Actions 执行构建、测试和 Lint，保存 APK 与报告。调试包用于验证，正式分发请设置自己的 release 签名；不同环境的调试签名可能不一致。
 
 自动测试覆盖提供商与密钥隔离、模型获取、每次请求注入 system 提示词、空提示词回退、双开实例匹配与去重冷却隔离、上下文跨群隔离 / 去重 / 过期 / 长度上限、昵称边界、指纹限流、接口校验和错误脱敏，以及无标题回复操作、群名核对、草稿保护、发送按钮选择，见 [VALIDATION.md](VALIDATION.md)。
 

@@ -34,7 +34,8 @@ class ChatUiPolicyTest {
         assertEquals(listOf(0), ChatUiPolicy.sendButtons(listOf(send, send.copy(top = 50, bottom = 90), send.copy(enabled = false), send.copy(clickable = false)), input, 1000))
     }
     @Test fun unrelatedActionsAreNeverClicked() {
-        assertTrue(ChatUiPolicy.sendButtons(listOf(send.copy(text = "转发"), send.copy(text = "删除"), send.copy(text = "发送给朋友")), input, 1000).isEmpty())
+        assertTrue(ChatUiPolicy.sendButtons(listOf(send.copy(text = "转发"), send.copy(text = "删除"), send.copy(text = "发送给朋友"),
+            send.copy(underScrollingContainer = true)), input, 1000).isEmpty())
         assertEquals(listOf(0), ChatUiPolicy.sendButtons(listOf(send.copy(text = "Send")), input, 1000))
     }
 }

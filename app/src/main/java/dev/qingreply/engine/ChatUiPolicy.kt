@@ -23,7 +23,7 @@ object ChatUiPolicy {
     } }
 
     fun sendButtons(nodes: List<UiElement>, input: UiElement, height: Int) = nodes.indices.filter { i -> nodes[i].let {
-        it.visible && it.enabled && it.clickable && !it.editable &&
+        it.visible && it.enabled && it.clickable && !it.editable && !it.underScrollingContainer &&
             (it.text.trim() == "发送" || it.text.trim().equals("send", true)) &&
             it.left >= input.left && kotlin.math.abs((it.top + it.bottom) / 2 - (input.top + input.bottom) / 2) <= height / 6
     } }
