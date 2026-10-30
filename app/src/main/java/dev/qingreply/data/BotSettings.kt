@@ -18,6 +18,8 @@ data class BotSettings(
     val boundSource: String = "",
     val contextEnabled: Boolean = true,
     val contextMessages: Int = 10,
+    val accessibilityFallback: Boolean = false,
+    val accessibilityChatTitle: String = "",
 ) {
     fun aliasList() = aliases.lineSequence().map { it.trim().removePrefix("@").removePrefix("＠") }
         .filter { it.isNotEmpty() }.distinct().toList()
@@ -38,6 +40,7 @@ data class BotSettings(
         NotificationSource.parse(boundSource) == null -> "请先在触发规则中绑定小号通知实例"
         cooldownSeconds !in 10..300 -> "冷却时间应为 10～300 秒"
         hourlyLimit !in 1..120 -> "每小时上限应为 1～120 条"
+        accessibilityFallback && accessibilityChatTitle.isBlank() -> "请填写无障碍发送要核对的 QQ 聊天页群名"
         else -> null
     }
 }

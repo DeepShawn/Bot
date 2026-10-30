@@ -42,6 +42,8 @@ class SettingsStore(context: Context) {
             boundSource = json.optString("boundSource", ""),
             contextEnabled = json.optBoolean("contextEnabled", true),
             contextMessages = json.optInt("contextMessages", 10).coerceIn(1, 20),
+            accessibilityFallback = json.optBoolean("accessibilityFallback", false),
+            accessibilityChatTitle = json.optString("accessibilityChatTitle", ""),
         )
     }
 
@@ -51,6 +53,7 @@ class SettingsStore(context: Context) {
             put("enabled", value.enabled); put("baseUrl", value.baseUrl.trim())
             put("providerId", value.providerId); put("boundSource", value.boundSource)
             put("contextEnabled", value.contextEnabled); put("contextMessages", value.contextMessages.coerceIn(1, 20))
+            put("accessibilityFallback", value.accessibilityFallback); put("accessibilityChatTitle", value.accessibilityChatTitle.trim())
             put("model", value.model.trim()); put("systemPrompt", value.systemPrompt)
             put("aliases", value.aliases); put("allowMentionMarker", value.allowMentionMarker)
             put("allowedConversations", value.allowedConversations)

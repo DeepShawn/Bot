@@ -186,7 +186,7 @@ private fun Overview(config: BotSettings, connected: Boolean, permission: Boolea
             Text("›", color = muted(), fontSize = 24.sp)
         }
     }
-    Text("需要 QQ 显示消息详情并提供通知“回复”按钮。静音群、前台聊天或隐藏内容时可能无法触发；无法读取撤回消息或历史聊天。", color = muted(), fontSize = 12.sp, lineHeight = 19.sp)
+    Text("优先使用通知快捷回复。QQ 未提供时，可在触发规则中启用无障碍发送。静音群、前台聊天或隐藏内容可能无法触发。", color = muted(), fontSize = 12.sp, lineHeight = 19.sp)
 }
 
 @Composable
@@ -278,12 +278,40 @@ private fun InstanceBinding(vm: BotViewModel, permission: Boolean) {
             Text("${source.packageName} · UID ${source.uid}\n" +
                 "正文：${if (candidate.hasText) "可读取" else "不可用"} · 快捷回复：${if (candidate.canReply) "可用" else "未提供"}",
                 color = muted(), fontSize = 11.sp, lineHeight = 19.sp)
-            val ready = candidate.hasText && candidate.canReply
-            TextButton(if (source == bound) "当前已绑定" else if (ready) "将这个实例绑定为小号" else "此通知暂不支持自动回复",
+            Text(candidate.diagnostic, color = muted(), fontSize = 11.sp, lineHeight = 18.sp)
+            if (!candidate.canReply && candidate.hasText) Text("消息可以读取，仍可绑定。发送需要下方的无障碍方案。", color = MiuixTheme.colorScheme.primary, fontSize = 12.sp, lineHeight = 19.sp)
+            val ready = candidate.hasText
+            TextButton(if (source == bound) "当前已绑定" else if (ready) "将这个实例绑定为小号" else "请先开启 QQ 通知正文",
                 { vm.bind(candidate) }, Modifier.fillMaxWidth(), enabled = ready && source != bound)
         }
     }
-    Note("小米双开检测说明", "轻答按 Android 用户和 UID 区分 QQ 实例，隔离会话去重与冷却；Android 10 以下按包名和用户区分。若一直看不到小号通知，系统可能未向轻答开放双开通知；若没有“回复”入口，此方案无法自动发送。请先确认这两项，再开启回复。")
+    Note("读取与发送分开配置", "识别到 Android 用户 999 说明已收到双开通知。没有快捷回复入口时，绑定后开启无障碍发送。若小号通知完全不可见，无障碍不能补齐通知监听的跨用户权限。")
+}
+
+@Composable
+private fun AccessibilitySending(vm: BotViewModel) {
+    val context = LocalContext.current
+    val connected by vm.accessibilityConnected.collectAsStateWithLifecycle()
+    val draft = vm.draft
+    SectionLabel("无障碍发送", "手机端备用方案")
+    Panel {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f).padding(end = 12.dp)) {
+                Text("没有快捷回复时自动操作 QQ", fontSize = 15.sp)
+                Text("打开小号原会话 → 核对群名 → 填写并点击发送。", color = muted(), fontSize = 12.sp, lineHeight = 19.sp, modifier = Modifier.padding(top = 5.dp))
+            }
+            Switch(draft.accessibilityFallback, { value -> vm.edit { it.copy(accessibilityFallback = value) } })
+        }
+        if (draft.accessibilityFallback) {
+            Field("QQ 聊天页顶部的完整群名", draft.accessibilityChatTitle, "例如：测试群（请与 QQ 页顶部文字完全一致）") { value ->
+                vm.edit { it.copy(accessibilityChatTitle = value) }
+            }
+            Pill(if (connected) "无障碍服务已连接" else "无障碍服务未连接", if (connected) MiuixTheme.colorScheme.primary else Amber)
+            TextButton("打开系统无障碍设置", { openSettings(context, Settings.ACTION_ACCESSIBILITY_SETTINGS, vm) }, Modifier.fillMaxWidth())
+            Text("开启“轻答 · QQ 自动发送”，小米如有拦截，还需在应用权限中允许后台弹出界面。安装来源受限制时，在应用信息中允许受限制的设置。修改后点击本页下方“保存规则”。", color = muted(), fontSize = 12.sp, lineHeight = 19.sp)
+        }
+        Text("需要保持解锁。发送时会把 QQ 切到前台，完成后回到桌面，便于接收下一条通知。只核对你设置的一个群名；不覆盖已有草稿，不解锁手机，不使用剪贴板或坐标盲点。QQ 界面版本不兼容时会停止并记录原因。", color = muted(), fontSize = 12.sp, lineHeight = 19.sp)
+    }
 }
 
 @Composable
@@ -294,6 +322,7 @@ private fun RulesPage(vm: BotViewModel, permission: Boolean) {
     var hourly by rememberSaveable { mutableStateOf(draft.hourlyLimit.toString()) }
     PageTitle("被叫到，才回应", "把触发条件设清楚，让回复刚刚好。")
     InstanceBinding(vm, permission)
+    AccessibilitySending(vm)
     SectionLabel("识别小号", "填写被 @ 的账号")
     Panel {
         Field("小号的昵称 / 群名片", draft.aliases, "每行一个，例如：\n小明的小号\n群聊助手", multiline = true) { value -> vm.edit { it.copy(aliases = value) } }
@@ -388,7 +417,7 @@ private fun EventsPage(events: List<BotEvent>, clear: () -> Unit) {
             }
         }
     }
-    Note("排查没有回复", "先确认总览显示“监听已连接”。请让其他账号在 QQ 群里发送带你昵称的 @ 消息，并检查系统通知是否出现正文和“回复”按钮。通知缺少回复入口时，此方案无法发送。")
+    Note("排查没有回复", "确认监听已连接、昵称与小号群名片一致。通知有正文但没有快捷回复时，开启无障碍发送、授予权限并填写 QQ 页顶部群名；保持手机解锁，检查运行记录中的具体原因。")
 }
 
 @Composable

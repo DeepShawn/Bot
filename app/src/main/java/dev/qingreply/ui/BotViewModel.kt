@@ -23,6 +23,7 @@ class BotViewModel(application: Application) : AndroidViewModel(application) {
     val events = app.runtime.events
     val stats = app.runtime.stats
     val connected = app.runtime.connected
+    val accessibilityConnected = app.runtime.accessibilityConnected
     val sources = app.runtime.sources
     private var captureJob: Job? = null
     private var modelJob: Job? = null
@@ -98,14 +99,15 @@ class BotViewModel(application: Application) : AndroidViewModel(application) {
 
     fun bind(candidate: SourceCandidate) {
         if (candidate !in sources.value) { notice = "通知来源已变化，请重新检测"; return }
-        if (!candidate.hasText || !candidate.canReply) {
-            notice = "该实例通知缺少正文或快捷回复入口，无法绑定为自动回复来源"; return
+        if (!candidate.hasText) {
+            notice = "通知没有可读取正文，请先开启 QQ 消息详情"; return
         }
         runCatching { app.settings.save(saved.value.copy(boundSource = candidate.source.id, enabled = false)) }
             .onSuccess {
                 draft = draft.copy(boundSource = candidate.source.id, enabled = false)
                 stopCapture()
-                notice = "小号通知实例已绑定。请填写小号昵称、保存规则，再到总览开启回复"
+                notice = if (candidate.canReply) "小号已绑定。请填写昵称、保存规则，再到总览开启回复"
+                    else "小号已绑定，可读取消息。请开启无障碍发送、填写目标群名并授予权限"
                 app.runtime.event(EventKind.INFO, "已绑定通知实例，自动回复保持暂停")
             }.onFailure { notice = "绑定保存失败，请重试" }
     }
@@ -132,6 +134,9 @@ class BotViewModel(application: Application) : AndroidViewModel(application) {
     fun toggle(enabled: Boolean, hasPermission: Boolean) {
         if (enabled && !hasPermission) { notice = "请先授予通知使用权"; return }
         if (enabled && saved.value.startError() != null) { notice = saved.value.startError()!!; return }
+        if (enabled && saved.value.accessibilityFallback && !accessibilityConnected.value) {
+            notice = "请先在系统无障碍设置开启“轻答 · QQ 自动发送”，并确认已连接"; return
+        }
         runCatching { app.settings.save(saved.value.copy(enabled = enabled)) }.onSuccess {
             draft = draft.copy(enabled = enabled)
             notice = if (enabled) "自动回复已开启，只处理之后收到的新消息" else "自动回复已暂停"

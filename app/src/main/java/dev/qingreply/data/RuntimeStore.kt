@@ -15,6 +15,7 @@ data class BotStats(val received: Int = 0, val matched: Int = 0, val submitted: 
 class RuntimeStore(context: Context) {
     private val prefs = context.getSharedPreferences("runtime", Context.MODE_PRIVATE)
     val connected = MutableStateFlow(false)
+    val accessibilityConnected = MutableStateFlow(false)
     val captureUntil = MutableStateFlow(0L)
     private val _sources = MutableStateFlow<List<SourceCandidate>>(emptyList())
     val sources = _sources.asStateFlow()

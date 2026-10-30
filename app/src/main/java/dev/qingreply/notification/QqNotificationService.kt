@@ -1,8 +1,9 @@
 package dev.qingreply.notification
 
 import android.app.PendingIntent
-import android.app.RemoteInput
+import androidx.core.app.RemoteInput
 import android.app.Notification
+import android.app.KeyguardManager
 import android.content.ComponentName
 import android.content.Intent
 import android.os.Bundle
@@ -18,6 +19,8 @@ import dev.qingreply.engine.GateSnapshot
 import dev.qingreply.engine.MentionMatcher
 import dev.qingreply.engine.ReplyGate
 import dev.qingreply.engine.SourceCandidate
+import dev.qingreply.accessibility.QqAccessibilityService
+import dev.qingreply.accessibility.UiReplyException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -34,6 +37,7 @@ class QqNotificationService : NotificationListenerService() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private data class Pending(val fingerprint: String, val conversationId: String, val job: Job)
     private val pending = mutableMapOf<String, Pending>()
+    private val uiSending = mutableSetOf<String>()
     private lateinit var gate: ReplyGate
     private var readySince = System.currentTimeMillis()
     private var lastConfig: BotSettings? = null
@@ -78,7 +82,8 @@ class QqNotificationService : NotificationListenerService() {
                 if (System.currentTimeMillis() < app.runtime.captureUntil.value &&
                     sbn.notification.flags and Notification.FLAG_GROUP_SUMMARY == 0) {
                     app.runtime.observe(SourceCandidate(source, NotificationReader.read(sbn) != null,
-                        NotificationReader.replyAction(sbn.notification) != null, System.currentTimeMillis()))
+                        NotificationReader.replyAction(sbn.notification) != null, System.currentTimeMillis(),
+                        sbn.notification.contentIntent != null, NotificationReader.replyDiagnostic(sbn.notification)))
                 }
                 if (source.matches(app.settings.settings.value.boundSource)) process(sbn)
             }
@@ -115,7 +120,14 @@ class QqNotificationService : NotificationListenerService() {
         if (!MentionMatcher.matches(message.text, config.aliasList(), config.allowMentionMarker)) return
         app.runtime.count(matched = 1)
         if (NotificationReader.replyAction(sbn.notification) == null) {
-            app.runtime.event(EventKind.SKIPPED, "收到 @ 消息，但此 QQ 通知未提供可用的快捷回复入口"); return
+            val unavailable = when {
+                !config.accessibilityFallback -> "QQ 没有快捷回复入口；请在触发规则中开启并配置无障碍发送"
+                !app.runtime.accessibilityConnected.value -> "请在系统无障碍设置开启“轻答 · QQ 自动发送”"
+                sbn.notification.contentIntent == null -> "QQ 没有提供原会话打开入口，无法定位小号群聊"
+                getSystemService(KeyguardManager::class.java).isKeyguardLocked -> "手机已锁屏：无障碍发送需要保持解锁"
+                else -> null
+            }
+            if (unavailable != null) { app.runtime.event(EventKind.SKIPPED, unavailable); return }
         }
         if (pending.size >= 3) {
             app.runtime.event(EventKind.SKIPPED, "正在处理其他消息，已跳过以避免积压"); return
@@ -141,28 +153,45 @@ class QqNotificationService : NotificationListenerService() {
                     !currentMessage.source.matches(config.boundSource)) {
                     app.runtime.event(EventKind.SKIPPED, "通知已消失或消息已更新，本次回复已取消"); return@launch
                 }
-                val action = NotificationReader.replyAction(current.notification) ?: run {
-                    app.runtime.event(EventKind.SKIPPED, "通知快捷回复入口已失效"); return@launch
+                val action = NotificationReader.replyAction(current.notification)
+                val usedAccessibility = action == null
+                if (action != null) {
+                    if (currentMessage.source.uid != 0 && action.actionIntent.creatorUid != currentMessage.source.uid) {
+                        app.runtime.event(EventKind.ERROR, "回复入口与绑定的小号 UID 不一致，已停止"); return@launch
+                    }
+                    val inputs = action.remoteInputs
+                    val results = Bundle().apply { inputs.forEach { putCharSequence(it.resultKey, answer) } }
+                    val intent = Intent()
+                    RemoteInput.addResultsToIntent(inputs, intent, results)
+                    RemoteInput.setResultsSource(intent, RemoteInput.SOURCE_FREE_FORM_INPUT)
+                    action.actionIntent.send(this@QqNotificationService, 0, intent)
+                } else {
+                    if (!config.accessibilityFallback) {
+                        app.runtime.event(EventKind.SKIPPED, "快捷回复入口失效，且未开启无障碍发送"); return@launch
+                    }
+                    val open = current.notification.contentIntent ?: throw UiReplyException("QQ 原会话入口已失效")
+                    uiSending.add(sbn.key)
+                    QqAccessibilityService.sendReply(open, message.source, config.accessibilityChatTitle, answer) {
+                        app.settings.settings.value == config && app.runtime.connected.value
+                    }
                 }
-                val inputs = action.remoteInputs.filter { it.allowFreeFormInput }.toTypedArray()
-                val results = Bundle().apply { inputs.forEach { putCharSequence(it.resultKey, answer) } }
-                val intent = Intent()
-                RemoteInput.addResultsToIntent(inputs, intent, results)
-                if (Build.VERSION.SDK_INT >= 28) RemoteInput.setResultsSource(intent, RemoteInput.SOURCE_FREE_FORM_INPUT)
-                action.actionIntent.send(this@QqNotificationService, 0, intent)
                 if (config.contextEnabled) app.conversations.remember(message.conversationId, "reply:${message.fingerprint}",
                     answer, System.currentTimeMillis(), fromBot = true)
                 app.runtime.count(submitted = 1)
-                app.runtime.event(EventKind.SUCCESS, "AI 回复已提交给 QQ；实际送达请在 QQ 中确认")
+                app.runtime.event(EventKind.SUCCESS, if (usedAccessibility) "无障碍已点击发送并确认输入框清空；请以 QQ 实际送达为准"
+                    else "AI 回复已提交给 QQ；实际送达请在 QQ 中确认")
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: PendingIntent.CanceledException) {
                 app.runtime.event(EventKind.ERROR, "QQ 回复入口已过期，请等待下一条新消息")
             } catch (error: AiException) {
                 app.runtime.event(EventKind.ERROR, error.displayMessage)
+            } catch (error: UiReplyException) {
+                app.runtime.event(EventKind.ERROR, error.displayMessage)
             } catch (_: Exception) {
                 app.runtime.event(EventKind.ERROR, "回复失败，请检查通知权限与 QQ 快捷回复功能")
             } finally {
+                uiSending.remove(sbn.key)
                 if (pending[sbn.key]?.fingerprint == message.fingerprint) pending.remove(sbn.key)
             }
         }
@@ -172,7 +201,7 @@ class QqNotificationService : NotificationListenerService() {
 
     override fun onNotificationRemoved(sbn: StatusBarNotification?) {
         sbn ?: return
-        scope.launch { pending.remove(sbn.key)?.job?.cancel() }
+        scope.launch { if (sbn.key !in uiSending) pending.remove(sbn.key)?.job?.cancel() }
     }
 
     private fun readGate(): GateSnapshot = runCatching {

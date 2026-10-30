@@ -1,21 +1,21 @@
-name: Publish v1.2.0 Release
+name: Publish verified Release
 
 on:
-  push:
-    branches: [main]
-    paths: ['.github/workflows/release.yml']
-  workflow_dispatch:
+  workflow_run:
+    workflows: ['Android build']
+    types: [completed]
 
 permissions:
   contents: write
   actions: read
 
 concurrency:
-  group: publish-v1.2.0
+  group: publish-verified-release
   cancel-in-progress: false
 
 jobs:
   release:
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
       - name: Download verified APK
@@ -23,35 +23,43 @@ jobs:
         with:
           name: qingreply-debug-apk
           path: dist
-          run-id: 40990411710
+          run-id: ${{ github.event.workflow_run.id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Publish downloadable release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
+          BUILD_SHA: ${{ github.event.workflow_run.head_sha }}
+          BUILD_RUN: ${{ github.event.workflow_run.id }}
         shell: bash
         run: |
           set -euo pipefail
-          mv dist/app-debug.apk dist/qingreply-1.2.0-debug.apk
-          gh api repos/DeepShawn/Bot/zipball/e81ac51b701fdcb488bc60b7fcedd578f0b1c04e > dist/qingreply-1.2.0-source.zip
-          (cd dist && sha256sum qingreply-1.2.0-debug.apk qingreply-1.2.0-source.zip > SHA256SUMS.txt)
-          cat > dist/release-notes.md <<'NOTES'
-          群里 @ 小号后，结合近期同群上下文与系统提示词调用 AI，再通过小号自动回复原群，无需复制粘贴。
-
-          - DeepSeek 等提供商模板、模型自动填充与模型查询。
-          - 小米 QQ 双开通知实例绑定。
-          - 系统提示词模板与同群上下文隔离。
-          - 冷却、去重、请求上限和运行记录。
-
-          Android 8.0 及以上。本版本为调试签名测试包；不同环境的调试签名可能不一致。安装提示签名不一致时需先卸载旧版，卸载会清除本机配置。
-
-          小米系统须向轻答开放双开通知，QQ 通知须有正文和快捷回复入口。上下文仅来自可见通知，尚未完成小米双开真机验证。
-
-          发布产物复用已通过 GitHub Actions 的构建：32 项自动测试通过，Lint 无错误。
-          https://github.com/DeepShawn/Bot/actions/runs/40990411710
-          NOTES
-          if gh release view v1.2.0 >/dev/null 2>&1; then
-            gh release upload v1.2.0 dist/qingreply-1.2.0-debug.apk dist/qingreply-1.2.0-source.zip dist/SHA256SUMS.txt
-          else
-            gh release create v1.2.0 dist/qingreply-1.2.0-debug.apk dist/qingreply-1.2.0-source.zip dist/SHA256SUMS.txt --target e81ac51b701fdcb488bc60b7fcedd578f0b1c04e --title '轻答 v1.2.0（测试版）' --notes-file dist/release-notes.md --prerelease
+          CURRENT_SHA=$(gh api "repos/$GH_REPO/commits/main" --jq .sha)
+          if [ "$CURRENT_SHA" != "$BUILD_SHA" ]; then
+            echo 'A newer commit is being built; skip this older release.'
+            exit 0
           fi
+          gh api "repos/$GH_REPO/contents/app/build.gradle.kts?ref=$BUILD_SHA" --jq .content | base64 --decode > build.gradle.kts
+          VERSION=$(sed -n 's/.*versionName = "\([0-9][0-9.]*\)".*/\1/p' build.gradle.kts)
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then exit 1; fi
+          TAG="v$VERSION"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo 'This version is already published; leaving it unchanged.'
+            exit 0
+          fi
+          mv dist/app-debug.apk "dist/qingreply-$VERSION-debug.apk"
+          gh api "repos/$GH_REPO/zipball/$BUILD_SHA" > "dist/qingreply-$VERSION-source.zip"
+          (cd dist && sha256sum "qingreply-$VERSION-debug.apk" "qingreply-$VERSION-source.zip" > SHA256SUMS.txt)
+          cat > dist/release-notes.md <<'NOTES'
+          本版修复了“有通知正文但没有快捷回复就无法绑定”的问题，扩展兼容回复入口检测，并新增纯手机无障碍发送。
+
+          使用步骤：绑定小号 → 开启无障碍备用发送 → 填写 QQ 聊天页顶部完整群名 → 在系统设置开启“轻答 · QQ 自动发送” → 保存并开启自动回复。
+
+          无障碍会打开原通知对应的小号会话，核对群名，在空输入框填写并点击发送，确认输入框清空后回到桌面。需要保持手机解锁；小米必要时允许后台弹出界面。不覆盖已有草稿，不使用剪贴板，不按坐标盲点。
+
+          仍需在实际 QQ / HyperOS 版本验证可访问输入框、发送按钮及双开入口；尚未完成用户手机实测。服务端实际送达以 QQ 为准。
+
+          附件是调试签名测试 APK。不同构建环境的调试签名可能不同；签名不一致时需卸载旧版，卸载会清除设备上的配置。源码和 SHA256 校验一并附带。
+          NOTES
+          printf '\n构建、自动测试和 Lint 已通过：\nhttps://github.com/%s/actions/runs/%s\n' "$GH_REPO" "$BUILD_RUN" >> dist/release-notes.md
+          gh release create "$TAG" "dist/qingreply-$VERSION-debug.apk" "dist/qingreply-$VERSION-source.zip" dist/SHA256SUMS.txt --target "$BUILD_SHA" --title "轻答 $TAG" --notes-file dist/release-notes.md

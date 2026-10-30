@@ -1,0 +1,3 @@
+<resources>
+    <string name="accessibility_description">QQ 通知没有快捷回复入口时，轻答通过绑定小号的通知打开原会话，核对你设置的群名，填写 AI 回复并点击发送，随后返回桌面。只在自动回复任务中读取 QQ 界面，不保存界面内容。不解锁手机、不覆盖已有草稿。</string>
+</resources>

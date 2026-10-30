@@ -1,11 +1,15 @@
 package dev.qingreply.notification
 
 import android.app.Notification
+import android.app.PendingIntent
 import android.os.Build
 import android.service.notification.StatusBarNotification
 import androidx.core.app.NotificationCompat
 import androidx.core.app.Person
+import androidx.core.app.RemoteInput
 import dev.qingreply.engine.NotificationSource
+import dev.qingreply.engine.ReplyActionPolicy
+import dev.qingreply.engine.ReplyCapability
 import java.security.MessageDigest
 
 data class IncomingMessage(
@@ -19,6 +23,8 @@ data class IncomingMessage(
     val source: NotificationSource,
     val sender: String,
 )
+
+data class QuickReplyAction(val actionIntent: PendingIntent, val remoteInputs: Array<RemoteInput>)
 
 object NotificationReader {
     const val QQ_PACKAGE = "com.tencent.mobileqq"
@@ -54,12 +60,37 @@ object NotificationReader {
             latest?.person?.name?.toString() ?: "群成员")
     }
 
-    fun replyAction(notification: Notification): Notification.Action? = notification.actions
-        ?.filter { action -> action.actionIntent != null && action.remoteInputs?.any { it.allowFreeFormInput } == true }
-        ?.firstOrNull { action ->
-            val semanticReply = Build.VERSION.SDK_INT >= 28 && action.semanticAction == Notification.Action.SEMANTIC_ACTION_REPLY
-            semanticReply || action.title?.toString()?.let { it.contains("回复") || it.contains("reply", ignoreCase = true) } == true
-        }?.takeUnless { Build.VERSION.SDK_INT >= 31 && it.isAuthenticationRequired }
+    private fun compatibleActions(notification: Notification): List<NotificationCompat.Action> {
+        val normal = notification.actions.orEmpty().indices.mapNotNull { NotificationCompat.getAction(notification, it) }
+        val wearable = runCatching { NotificationCompat.WearableExtender(notification).actions }.getOrDefault(emptyList())
+        val invisible = runCatching { NotificationCompat.getInvisibleActions(notification) }.getOrDefault(emptyList())
+        val car = runCatching {
+            @Suppress("DEPRECATION")
+            val conversation = NotificationCompat.CarExtender(notification).unreadConversation
+            val reply = conversation?.replyPendingIntent
+            val input = conversation?.remoteInput
+            if (reply == null || input == null) null else NotificationCompat.Action.Builder(0, "回复", reply)
+                .addRemoteInput(input).setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_REPLY).build()
+        }.getOrNull()
+        return (normal + wearable + invisible + listOfNotNull(car))
+            .filter { it.actionIntent?.creatorPackage == QQ_PACKAGE }
+            .distinctBy { it.actionIntent to it.remoteInputs.orEmpty().map { input -> input.resultKey } }
+    }
+
+    fun replyAction(notification: Notification): QuickReplyAction? {
+        val actions = compatibleActions(notification)
+        val index = ReplyActionPolicy.choose(actions.map { action -> ReplyCapability(
+            action.remoteInputs?.any { it.allowFreeFormInput } == true, action.isAuthenticationRequired,
+            action.semanticAction == NotificationCompat.Action.SEMANTIC_ACTION_REPLY, action.title?.toString().orEmpty()) }) ?: return null
+        val action = actions[index]
+        return QuickReplyAction(action.actionIntent ?: return null, action.remoteInputs.orEmpty().filter { it.allowFreeFormInput }.toTypedArray())
+    }
+
+    fun replyDiagnostic(notification: Notification): String {
+        val actions = compatibleActions(notification)
+        val free = actions.count { it.remoteInputs?.any { input -> input.allowFreeFormInput } == true }
+        return "通知操作 ${actions.size} 个 · 自由文本操作 $free 个 · 原会话入口${if (notification.contentIntent != null) "可用" else "缺失"}"
+    }
 
     private fun samePerson(a: Person?, b: Person?): Boolean {
         if (a == null || b == null) return false

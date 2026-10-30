@@ -22,4 +22,6 @@ data class SourceCandidate(
     val hasText: Boolean,
     val canReply: Boolean,
     val time: Long,
+    val canOpen: Boolean = false,
+    val diagnostic: String = "",
 )
