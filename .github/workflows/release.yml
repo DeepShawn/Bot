@@ -1,0 +1,57 @@
+name: Publish v1.2.0 Release
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/release.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: publish-v1.2.0
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download verified APK
+        uses: actions/download-artifact@v4
+        with:
+          name: qingreply-debug-apk
+          path: dist
+          run-id: 40990411710
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish downloadable release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mv dist/app-debug.apk dist/qingreply-1.2.0-debug.apk
+          gh api repos/DeepShawn/Bot/zipball/e81ac51b701fdcb488bc60b7fcedd578f0b1c04e > dist/qingreply-1.2.0-source.zip
+          (cd dist && sha256sum qingreply-1.2.0-debug.apk qingreply-1.2.0-source.zip > SHA256SUMS.txt)
+          cat > dist/release-notes.md <<'NOTES'
+          群里 @ 小号后，结合近期同群上下文与系统提示词调用 AI，再通过小号自动回复原群，无需复制粘贴。
+
+          - DeepSeek 等提供商模板、模型自动填充与模型查询。
+          - 小米 QQ 双开通知实例绑定。
+          - 系统提示词模板与同群上下文隔离。
+          - 冷却、去重、请求上限和运行记录。
+
+          Android 8.0 及以上。本版本为调试签名测试包；不同环境的调试签名可能不一致。安装提示签名不一致时需先卸载旧版，卸载会清除本机配置。
+
+          小米系统须向轻答开放双开通知，QQ 通知须有正文和快捷回复入口。上下文仅来自可见通知，尚未完成小米双开真机验证。
+
+          发布产物复用已通过 GitHub Actions 的构建：32 项自动测试通过，Lint 无错误。
+          https://github.com/DeepShawn/Bot/actions/runs/40990411710
+          NOTES
+          if gh release view v1.2.0 >/dev/null 2>&1; then
+            gh release upload v1.2.0 dist/qingreply-1.2.0-debug.apk dist/qingreply-1.2.0-source.zip dist/SHA256SUMS.txt
+          else
+            gh release create v1.2.0 dist/qingreply-1.2.0-debug.apk dist/qingreply-1.2.0-source.zip dist/SHA256SUMS.txt --target e81ac51b701fdcb488bc60b7fcedd578f0b1c04e --title '轻答 v1.2.0（测试版）' --notes-file dist/release-notes.md --prerelease
+          fi
